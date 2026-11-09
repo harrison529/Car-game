@@ -10,7 +10,7 @@ test('download starts and races when browser storage writes are denied',async({p
  await page.getByRole('button',{name:'LET’S RACE'}).click();
  await expect(page.getByText('READY. SET. UNLEASH.')).toBeVisible({timeout:6000});
  await expect(page.getByText('Browser saving is blocked.')).toBeVisible();
- await page.getByRole('button',{name:/QUICK PLAY/}).click();
+ await page.getByRole('button',{name:/QUICK PLAY/}).click();await page.getByRole('button',{name:'PLAY OFFLINE WITH BOTS'}).click();
  await expect(page.locator('canvas')).toBeVisible({timeout:13000});
 });
 test('download starts inside preview with storage and form submissions blocked',async({page})=>{

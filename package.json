@@ -1,1 +1,20 @@
-{"name":"turbo-toy-racing","version":"1.0.0","private":true,"type":"module","scripts":{"dev":"vite --host 0.0.0.0","build":"vite build","test":"node --test tests/*.test.js"},"devDependencies":{"vite":"^6.4.1","@playwright/test":"^1.56.1"}}
+{
+  "name": "turbo-toy-racing",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "vite --host 0.0.0.0",
+    "build": "vite build",
+    "test": "node --test tests/*.test.js",
+    "start": "node server.js",
+    "build:download": "node scripts/build-download.js"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.56.1",
+    "vite": "^6.4.1"
+  },
+  "dependencies": {
+    "ws": "^8.22.2"
+  }
+}
