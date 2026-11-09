@@ -19,7 +19,7 @@ Create a local driver profile, then choose a car and one of five tracks. Quick P
 
 - **Drive:** hold Right; Left brakes; Space jumps; Up boosts; Escape pauses.
 - **Touch:** use the Gas, Brake, Jump and Boost buttons.
-- **Friend racing:** connect to the same server, create a private room, and share its six-character code. The ten-second countdown begins when a second driver joins. The one-keyboard option remains available (player two: D to drive, A to brake, W to jump).
+- **Friend racing:** enter an online friend’s driver name and send a race request. They receive an Accept & Race / Decline prompt; accepting joins both drivers to a private race. Room codes and the one-keyboard option remain available (player two: D to drive, A to brake, W to jump).
 - **Garage:** 60 original collectible cars; select any owned car.
 - **Daily shop:** six deterministic offers, rotating at 00:00 UTC. New drivers receive 2,000 coins.
 
@@ -37,7 +37,7 @@ npm start
 
 The server serves the game and `/online` WebSocket endpoint on port 3001 (override with `PORT`). It also exposes `/health`. For friends on the same network, open the host computer's LAN address and port. For players across the internet, deploy this Node process to a public host with HTTPS and WebSocket support; configure the host's reverse proxy to forward `/online` upgrades. Set a single instance: rooms are held in memory and a restart ends active races. No public server is bundled or automatically deployed.
 
-Quick Play and Tournament offer Connect & Race or Play Offline with Bots. Everyone must use the same server address. Friend Racing offers Create / Join Room. A downloaded file cannot provide an online server by itself: enter the public server's HTTPS address in its connection panel. Browser-hosted copies default to their own origin. Failed connections and invalid room codes show errors instead of claiming players were matched.
+Quick Play and Tournament offer Connect & Race or Play Offline with Bots. Everyone must use the same server address. Friend Racing opens Send a Race Request. Both drivers must be online on the same server. Browser-hosted profiles connect for requests automatically when the server is available; downloaded files can use Go Online to Receive Requests after entering the server address. The friend receives an in-game notification and can accept or decline. Requests expire after 60 seconds; they can be cancelled and are cancelled on disconnect or when either driver starts another race. Offline friends receive no notification, and the sender sees an offline message. Online driver names are unique per server session, case-insensitively, and are display names rather than authenticated identities. Use Room Code remains available as an alternative. A downloaded file cannot provide an online server by itself: enter the public server's HTTPS address in its connection panel. Browser-hosted copies default to their own origin. Failed connections and invalid room codes show errors instead of claiming players were matched.
 
 Profiles, selected cars, coins, purchases, and race records remain local to the browser; storage-blocked previews can play without persistence. Driver names are display names, not authenticated accounts. Local clock/storage can be edited; this is not a secure online economy. The server validates control inputs and simulates positions itself, but does not persist accounts or purchases.
 
@@ -53,6 +53,6 @@ npm run build
 npx playwright test
 ```
 
-Browser tests use system Chromium at `/usr/bin/chromium`. Set `CHROMIUM_PATH` to another installed Chromium binary if needed. Tests cover onboarding, persistence, purchasing, the 60-car garage, mobile overflow, a full race and reward, pause/resume, friend mode, tournament startup, blocked browser storage, sandboxed previews, and two real browser clients racing in a private room. Server tests exercise bot fill, private room errors, disconnect replacement, authoritative inputs, and all tournament rounds.
+Browser tests use system Chromium at `/usr/bin/chromium`. Set `CHROMIUM_PATH` to another installed Chromium binary if needed. Tests cover onboarding, persistence, purchasing, the 60-car garage, mobile overflow, a full race and reward, pause/resume, friend mode, tournament startup, blocked browser storage, sandboxed previews, and two real browser clients racing in a private room. Server tests exercise bot fill, private room errors, disconnect replacement, authoritative inputs, and all tournament rounds, friend request acceptance/decline, protected invitation rooms, expiry, cancellation, and offline errors.
 
 No external art, fonts, or API keys are required. Online play requires the included Node/WebSocket server; offline bot play does not. Each cloud task is already isolated: use the existing checkout rather than creating a worktree.
