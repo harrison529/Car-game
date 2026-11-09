@@ -6,8 +6,8 @@ import {randomBytes} from 'node:crypto';
 import {WebSocketServer,WebSocket} from 'ws';
 import {cars,tracks} from './src/game.js';
 
-export function createGameServer({waitMs=10000,maxRaceSeconds=150,roundWaitMs=10000,dist=resolve('dist')}={}){
- const rooms=new Map(),clients=new Set();
+export function createGameServer({waitMs=10000,maxRaceSeconds=150,roundWaitMs=10000,inviteMs=60000,dist=resolve('dist')}={}){
+ const rooms=new Map(),clients=new Set(),invitations=new Map();
  const server=createServer(async(req,res)=>{
   if(req.url==='/health'){res.writeHead(200,{'content-type':'application/json'});res.end(JSON.stringify({ok:true,players:clients.size}));return;}
   try{const path=resolve(dist,'.'+decodeURIComponent(new URL(req.url,'http://local').pathname));if(path!==dist&&!path.startsWith(dist+sep)){res.writeHead(403);res.end();return;}const file=path===dist?resolve(dist,'index.html'):path;const content=await readFile(file);res.writeHead(200,{'content-type':{'.html':'text/html','.js':'text/javascript','.css':'text/css'}[extname(file)]||'application/octet-stream'});res.end(content);}catch{res.writeHead(404);res.end('Not found. Run npm run build first.');}
@@ -17,6 +17,11 @@ export function createGameServer({waitMs=10000,maxRaceSeconds=150,roundWaitMs=10
  const broadcast=(room,data)=>room.members.forEach(c=>send(c.ws,data));
  const roster=room=>room.members.map(c=>({id:c.id,name:c.name,car:c.car}));
  const lobby=room=>broadcast(room,{type:'lobby',code:room.code,mode:room.mode,track:room.track,players:roster(room),remaining:Math.max(0,Math.ceil((room.deadline-Date.now())/1000))});
+ function endInvite(invite,status){invitations.delete(invite.id);for(const person of [invite.from,invite.to])send(person.ws,{type:'invite_status',id:invite.id,status,friend:person===invite.from?invite.to.name:invite.from.name});}
+ function register(c,msg){if(typeof msg.name!=='string'||!msg.name.trim())throw Error('Enter a driver name.');const name=msg.name.trim().slice(0,20);if([...clients].some(p=>p!==c&&p.registered&&p.name.toLowerCase()===name.toLowerCase()))throw Error('That driver name is already online. Choose another name.');c.name=name;c.registered=true;c.available=true;send(c.ws,{type:'registered',name:c.name});}
+ function requestInvite(c,msg){if(!c.registered)throw Error('Connect before inviting a friend.');if(!c.available)throw Error('Finish your current race first.');const target=[...clients].find(p=>p.registered&&p.name.toLowerCase()===String(msg.friend||'').trim().toLowerCase());if(!target)throw Error('Friend is offline. Ask them to open the game on this server.');if(target===c)throw Error('Choose another driver to race.');if(!target.available)throw Error('Your friend is racing. Try again when they finish.');if([...invitations.values()].some(i=>i.from===c||i.to===c||i.from===target||i.to===target))throw Error('A race request is already pending.');if(Date.now()-(c.lastInvite||0)<3000)throw Error('Wait a moment before sending another request.');c.lastInvite=Date.now();const invite={id:randomBytes(12).toString('hex'),from:c,to:target,track:Number.isInteger(msg.track)&&tracks[msg.track]?msg.track:0,expires:Date.now()+inviteMs};invitations.set(invite.id,invite);send(c.ws,{type:'invite_status',id:invite.id,status:'sent',friend:target.name});send(target.ws,{type:'race_invite',id:invite.id,from:c.name,track:invite.track,expires:invite.expires});}
+ function respondInvite(c,msg){const invite=invitations.get(msg.id);if(!invite||invite.to!==c)throw Error('This race request is no longer available.');if(Date.now()>=invite.expires){endInvite(invite,'expired');return;}if(msg.accept!==true){endInvite(invite,'declined');return;}if(!invite.from.available||!c.available){endInvite(invite,'cancelled');return;}if(rooms.size>=200)throw Error('Server is full. Try again shortly.');let code;do{code=randomBytes(3).toString('hex').toUpperCase();}while(rooms.has(code));const fromTicket=randomBytes(16).toString('hex'),toTicket=randomBytes(16).toString('hex');const room={code,mode:'friend',track:invite.track,startTrack:invite.track,round:0,phase:'waiting',members:[],deadline:Infinity,createdAt:Date.now(),tickets:new Set([fromTicket,toTicket])};rooms.set(code,room);invitations.delete(invite.id);invite.from.available=false;c.available=false;send(invite.from.ws,{type:'invite_accepted',id:invite.id,code,ticket:fromTicket});send(c.ws,{type:'invite_accepted',id:invite.id,code,ticket:toTicket});}
+
  function advance(room){if(room.phase==='results'&&room.mode==='tournament'&&room.round<2&&room.members.every(m=>room.ready.has(m.id))){room.round++;room.track=(room.startTrack+room.round)%5;room.phase='between';room.deadline=Date.now()+roundWaitMs;broadcast(room,{type:'next',remaining:Math.ceil(roundWaitMs/1000)});}}
  function begin(room){
   room.phase='racing';room.updatedAt=Date.now();room.time=0;room.countdown=3;room.ready=new Set();
@@ -31,22 +36,23 @@ export function createGameServer({waitMs=10000,maxRaceSeconds=150,roundWaitMs=10
   if(typeof msg.name!=='string'||!msg.name.trim())throw Error('Enter a driver name.');
   c.name=msg.name.trim().slice(0,20);c.car=Number.isInteger(msg.car)&&cars[msg.car]?msg.car:0;
   const mode=['quick','tournament','friend'].includes(msg.mode)?msg.mode:'quick';const track=Number.isInteger(msg.track)&&tracks[msg.track]?msg.track:0;let room;
-  if(msg.code){const code=String(msg.code).toUpperCase();room=rooms.get(code);if(!room||room.phase!=='waiting'||room.mode!=='friend')throw Error('Room not found or race already started.');if(room.members.length>=4)throw Error('Room is full.');}
+  if(msg.code){const code=String(msg.code).toUpperCase();room=rooms.get(code);if(!room||room.phase!=='waiting'||room.mode!=='friend')throw Error('Room not found or race already started.');if(room.members.length>=4)throw Error('Room is full.');if(room.tickets&&!room.tickets.has(msg.ticket))throw Error('Accept a race invitation to join this room.');}
   else if(mode!=='friend')room=[...rooms.values()].find(r=>r.mode===mode&&r.track===track&&r.phase==='waiting'&&r.members.length<4);
   if(!room){if(rooms.size>=200)throw Error('Server is full. Try again shortly.');let code;do{code=randomBytes(3).toString('hex').toUpperCase();}while(rooms.has(code));room={code,mode,track,startTrack:track,round:0,phase:'waiting',members:[],deadline:Date.now()+waitMs,createdAt:Date.now()};rooms.set(code,room);}
-  c.room=room;room.members.push(c);
+  c.room=room;if(room.tickets)room.tickets.delete(msg.ticket);room.members.push(c);
   // Private rooms start their ten-second countdown when a friend joins.
   if(room.mode==='friend'&&room.members.length===1)room.deadline=Infinity;
   if(room.mode==='friend'&&room.members.length===2)room.deadline=Date.now()+waitMs;
   send(c.ws,{type:'joined',id:c.id});lobby(room);
  }
  wss.on('connection',ws=>{if(clients.size>=800){ws.close(1013,'Server full');return;}const c={ws,id:randomBytes(8).toString('hex'),input:{},room:null,lastInput:0,budget:0,budgetAt:Date.now()};clients.add(c);
-  ws.on('message',raw=>{try{if(Date.now()-c.budgetAt>1000){c.budget=0;c.budgetAt=Date.now();}if(++c.budget>80){ws.close(1008,'Too many messages');return;}const msg=JSON.parse(raw.toString());if(msg.type==='join')join(c,msg);else if(msg.type==='leave')leave(c);else if(msg.type==='input'){c.input={gas:msg.gas===true,brake:msg.brake===true,jump:msg.jump===true,boost:msg.boost===true};c.lastInput=Date.now();}else if(msg.type==='ready'&&c.room?.phase==='results'&&c.room.mode==='tournament'&&c.room.round<2){c.room.ready.add(c.id);advance(c.room);}}catch(e){send(ws,{type:'error',message:e instanceof SyntaxError?'Invalid message.':e.message});}});
-  c.alive=true;ws.on('pong',()=>{c.alive=true;});ws.on('error',()=>{});ws.on('close',()=>{leave(c);clients.delete(c);});
+  ws.on('message',raw=>{try{if(Date.now()-c.budgetAt>1000){c.budget=0;c.budgetAt=Date.now();}if(++c.budget>80){ws.close(1008,'Too many messages');return;}const msg=JSON.parse(raw.toString());if(msg.type==='register')register(c,msg);else if(msg.type==='presence'){c.available=msg.available===true;if(!c.available)for(const i of [...invitations.values()])if(i.from===c||i.to===c)endInvite(i,'cancelled');}else if(msg.type==='invite')requestInvite(c,msg);else if(msg.type==='invite_response')respondInvite(c,msg);else if(msg.type==='invite_cancel'){const i=invitations.get(msg.id);if(i&&i.from===c)endInvite(i,'cancelled');}else if(msg.type==='join')join(c,msg);else if(msg.type==='leave')leave(c);else if(msg.type==='input'){c.input={gas:msg.gas===true,brake:msg.brake===true,jump:msg.jump===true,boost:msg.boost===true};c.lastInput=Date.now();}else if(msg.type==='ready'&&c.room?.phase==='results'&&c.room.mode==='tournament'&&c.room.round<2){c.room.ready.add(c.id);advance(c.room);}}catch(e){send(ws,{type:'error',message:e instanceof SyntaxError?'Invalid message.':e.message});}});
+  c.alive=true;ws.on('pong',()=>{c.alive=true;});ws.on('error',()=>{});ws.on('close',()=>{for(const i of [...invitations.values()])if(i.from===c||i.to===c)endInvite(i,'cancelled');leave(c);clients.delete(c);});
  });
  const heartbeat=setInterval(()=>{for(const c of clients){if(!c.alive){c.ws.terminate();continue;}c.alive=false;c.ws.ping();}},30000);heartbeat.unref();
  let previous=Date.now(),lastLobby=0;
  const timer=setInterval(()=>{const now=Date.now(),dt=Math.min((now-previous)/1000,.1);previous=now;
+  for(const i of [...invitations.values()])if(now>=i.expires)endInvite(i,'expired');
   for(const room of rooms.values()){
    if((room.phase==='waiting'||room.phase==='between')&&now>=room.deadline){begin(room);continue;}
    if(room.phase==='waiting'){if(now-lastLobby>500)lobby(room);if(now-room.createdAt>10*60*1000){broadcast(room,{type:'error',message:'Room expired. Create another room.'});room.members.forEach(c=>{c.room=null;});rooms.delete(room.code);}continue;}
